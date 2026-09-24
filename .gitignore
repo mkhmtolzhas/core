@@ -1,0 +1,98 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- Virtualenvs / uv ---
+.venv/
+venv/
+env/
+ENV/
+.python-version.local
+
+# uv.lock is intentionally tracked: this is an application, not a library.
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+credentials.json
+
+# --- Tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+.dmypy.json
+dmypy.json
+.tox/
+.nox/
+.cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+nosetests.xml
+
+# --- Agent runtime artifacts ---
+# Short-term checkpoints, long-term memory and prompt history, written into the
+# project root by src/core/config.py so they stay visible and easy to discard.
+core.db
+core.db-wal
+core.db-shm
+core.history
+*.faiss
+*.sqlite3
+*.db
+chroma/
+.chroma/
+.langgraph_api/
+.langgraph/
+checkpoints/
+
+# --- Editors / IDE ---
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.claude/settings.local.json
+
+# --- OS ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+
+# --- Logs ---
+*.log
+logs/

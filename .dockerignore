@@ -1,0 +1,88 @@
+# Everything the image must never carry, and everything that would
+# needlessly bust the build cache.
+
+# --- VCS ---
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# --- Virtualenvs ---
+# Built inside the image; a host .venv has wrong paths and wrong binaries.
+.venv/
+venv/
+env/
+ENV/
+
+# --- Python bytecode / build output ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+
+# --- Environment / secrets ---
+# Config is injected at runtime, never baked into a layer.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# --- Tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.tox/
+.nox/
+.cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# --- Agent runtime artifacts ---
+core.db
+core.db-wal
+core.db-shm
+core.history
+*.faiss
+*.sqlite3
+*.db
+chroma/
+.chroma/
+.langgraph_api/
+.langgraph/
+checkpoints/
+
+# --- Editors / IDE / agent config ---
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# --- Docs & local scaffolding ---
+README.md
+*.md
+!pyproject.toml
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+.ipynb_checkpoints/
+*.log
+logs/
+tests/

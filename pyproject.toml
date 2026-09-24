@@ -1,0 +1,22 @@
+[project]
+name = "local-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "deepagents>=0.7.13",
+    "langchain>=1.4.0",
+    "langchain-anthropic>=1.7.1",
+    "langchain-ollama>=1.1.0",
+    "langchain-openai>=1.6.0",
+    "langgraph>=1.2.11",
+    "langgraph-checkpoint-postgres>=3.1.2",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+    "prompt-toolkit>=3.0.53",
+    "psycopg[binary]>=3.3.5",
+    "pydantic-settings>=2.15.0",
+    "rich>=15.0.0",
+    "sqlalchemy>=2.0.52",
+]
