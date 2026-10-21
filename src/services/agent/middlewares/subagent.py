@@ -1,6 +1,7 @@
 from typing import List, Sequence
 
 from deepagents.backends import FilesystemBackend
+from deepagents.middleware._state import private_state_field_names
 from deepagents.middleware.subagents import (
     GENERAL_PURPOSE_SUBAGENT,
     SubAgent,
@@ -121,3 +122,24 @@ def build(
         backend=FilesystemBackend(root_dir=workspace_root),
         subagents=[general, researcher],
     )
+
+
+def keep_private_state(middlewares: Sequence[AgentMiddleware]) -> None:
+    """Stop subagents from inheriting state the parent keeps to itself.
+
+    A subagent starts from a copy of its parent's state, minus the keys
+    `SubAgentMiddleware` is told are private — and it is told nothing unless
+    someone collects them from the other middlewares' schemas.
+    `create_deep_agent` does that; building the middleware by hand skips it.
+    The shell middleware is the case that breaks: its live session sits in
+    state, and once copied into a subagent the checkpointer tries to serialise
+    it and every `task` call fails with `Type is not msgpack serializable`.
+
+    Collected from the whole chain, so it must run once the chain is complete.
+    """
+    private = private_state_field_names(
+        *(middleware.state_schema for middleware in middlewares)
+    )
+    for middleware in middlewares:
+        if isinstance(middleware, SubAgentMiddleware):
+            middleware.private_state_keys = middleware.private_state_keys | private

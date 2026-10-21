@@ -132,6 +132,29 @@ class Settings(BaseSettings):
     the parent gets the conclusion instead of every tool result along the way.
     """
 
+    # --- Observability (Langfuse) ---
+    langfuse_public_key: Optional[str] = None
+    langfuse_secret_key: Optional[str] = None
+    """Project key pair. Tracing is on exactly when both are set."""
+
+    langfuse_base_url: str = "http://localhost:3000"
+    """Langfuse server. The default is the instance `docker-compose.yml` starts."""
+
+    langfuse_tracing_environment: str = "development"
+    """Keeps local runs apart from production traces in the same project.
+
+    Lowercase letters, digits, `-` and `_` only; Langfuse drops anything else.
+    """
+
+    langfuse_release: Optional[str] = None
+    """Version of the code behind a trace, e.g. a git SHA.
+
+    What pins a regression in the dashboards to the deploy that caused it.
+    """
+
+    langfuse_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    """Share of turns traced. Sampling is per trace, so a kept turn is kept whole."""
+
     @model_validator(mode="after")
     def _require_api_key(self) -> "Settings":
         """Refuse to start a hosted provider without a credential.

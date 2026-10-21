@@ -139,6 +139,8 @@ def build_middlewares(
         )
     )
 
+    subagent.keep_private_state(middlewares)
+
     return middlewares
 
 

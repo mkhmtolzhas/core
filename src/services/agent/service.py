@@ -1,6 +1,8 @@
+import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Sequence
 from functools import lru_cache
-from typing import Any, AsyncIterator, Optional, Sequence, Tuple, cast
+from typing import Any, cast
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
@@ -16,6 +18,7 @@ from src.entities.prompt import Prompt
 from src.services.agent.memory.long_term import get_long_term_memory
 from src.services.agent.memory.short_term import get_short_term_memory
 from src.services.agent.middlewares import build_middlewares
+from src.services.agent.observability import Tracer, get_tracer
 from src.services.agent.providers import build_model
 from src.services.agent.tools import get_tools
 from src.services.agent.types import AgentState, Context
@@ -101,12 +104,14 @@ class AgentServiceImpl(AgentService):
         tools: Sequence[BaseTool],
         middlewares: Sequence[AgentMiddleware],
         system_prompt: str,
-        checkpointer: Optional[Checkpointer] = None,
-        store: Optional[BaseStore] = None,
-        state_schema: Optional[Any] = None,
-        context_schema: Optional[Any] = None,
+        tracer: Tracer,
+        checkpointer: Checkpointer | None = None,
+        store: BaseStore | None = None,
+        state_schema: Any | None = None,
+        context_schema: Any | None = None,
     ) -> None:
         self.llm = llm
+        self.tracer = tracer
         self.agent = create_agent(
             model=self.llm,
             tools=list(tools),
@@ -132,14 +137,57 @@ class AgentServiceImpl(AgentService):
         the only mode that emits it before the turn is finished; tools come from
         `updates`, because a call is announced there before it runs. A tool
         result appears in both, and taking it twice would print it twice.
+
+        The run itself happens in a task of its own, and this generator only
+        relays what that task produces. Tracing is the reason: the open trace
+        lives in context variables, and a caller that advances the stream from
+        a fresh task on every step — `interruptible` does — would give each
+        step its own copy of the context. Later observations would then lose
+        the session id, and the root could not be closed where it was opened.
         """
+        events: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+        run = asyncio.create_task(self._run(prompt, thread_id, events))
+        run.add_done_callback(lambda _: events.put_nowait(None))
+        try:
+            while (event := await events.get()) is not None:
+                yield event
+            run.result()  # the run's own failure, if it had one
+        finally:
+            if not run.done():
+                run.cancel()
+                await asyncio.gather(run, return_exceptions=True)
+
+    async def _run(
+        self, prompt: Prompt, thread_id: str, events: asyncio.Queue[AgentEvent | None]
+    ) -> None:
+        """Answer the prompt inside its trace, start to finish in this task.
+
+        The reply recorded is the text after the last tool event: what the
+        model said before calling a tool was a step on the way, not the answer.
+        """
+        with self.tracer.trace_prompt(session_id=thread_id, prompt=prompt.body) as trace:
+            answer: list[str] = []
+            try:
+                async for event in self._stream(prompt, thread_id):
+                    if isinstance(event, TextChunk):
+                        answer.append(event.body)
+                    else:
+                        answer.clear()
+                    events.put_nowait(event)
+            finally:
+                trace.record_answer("".join(answer))
+
+    async def _stream(self, prompt: Prompt, thread_id: str) -> AsyncIterator[AgentEvent]:
         stream = self.agent.astream(
             {"messages": [{"role": "user", "content": prompt.body}]},
-            config={"configurable": {"thread_id": thread_id}},
+            config={
+                "configurable": {"thread_id": thread_id},
+                "callbacks": list(self.tracer.callbacks()),
+            },
             stream_mode=[UPDATES_MODE, MESSAGES_MODE],
         )
         async for payload in stream:
-            mode, chunk = cast(Tuple[str, Any], payload)
+            mode, chunk = cast(tuple[str, Any], payload)
             if mode == MESSAGES_MODE:
                 token, metadata = chunk
                 if metadata.get("langgraph_node") != MODEL_NODE:
@@ -205,6 +253,7 @@ def get_agent_service() -> AgentService:
             tools=tools,
         ),
         system_prompt=SYSTEM_PROMPT,
+        tracer=get_tracer(),
         state_schema=AgentState,
         context_schema=Context,
     )
