@@ -10,7 +10,7 @@ from langchain.tools import BaseTool
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.store.base import BaseStore
-from langgraph.types import Checkpointer
+from langgraph.types import Checkpointer, StreamMode
 
 from src.core.config import settings
 from src.entities.event import AgentEvent, TextChunk, ToolCall, ToolResult
@@ -19,37 +19,13 @@ from src.services.agent.memory.long_term import get_long_term_memory
 from src.services.agent.memory.short_term import get_short_term_memory
 from src.services.agent.middlewares import build_middlewares
 from src.services.agent.observability import Tracer, get_tracer
+from src.services.agent.prompts import PromptSource, get_system_prompt_source
 from src.services.agent.providers import build_model
 from src.services.agent.tools import get_tools
 from src.services.agent.types import AgentState, Context
 
-SYSTEM_PROMPT = (
-    "You are a local engineering assistant working inside the user's project. "
-    "The workspace is mounted at `/`, so `/src` is the project's src directory; "
-    "there is no `/project` and no other root. "
-    "Use the available tools to ground every answer in the real workspace. "
-    "Answer completely: give the detail the question deserves, and prefer "
-    "showing what you found over summarising it away. "
-    "You keep a long-term memory across sessions: search it with get_lt_context "
-    "before answering anything that depends on the user's preferences, past "
-    "decisions or project conventions, and record a durable fact with "
-    "save_lt_context when you learn one. The conversation itself is remembered "
-    "for you, so do not save it. "
-    "Your reply is rendered as Markdown in a terminal, so write Markdown: "
-    "fenced blocks for code, backticks around paths, filenames and identifiers, "
-    "lists where they earn their place. Backticks matter for more than looks — "
-    "a bare `__init__.py` is read as emphasis and loses its underscores. "
-    "The message you write is the answer in full: never wrap it in tags such as "
-    "`<final_answer>`, never restate it as a separate conclusion, and never "
-    "invent markup of your own."
-)
-
-
-UPDATES_MODE = "updates"
-"""One event per graph step: this is where tool calls and results are visible."""
-
-MESSAGES_MODE = "messages"
-"""Token-level output, the only place the answer arrives before it is finished."""
+UPDATES_MODE: StreamMode = "updates"
+MESSAGES_MODE: StreamMode = "messages"
 
 MODEL_NODE = "model"
 TOOLS_NODE = "tools"
@@ -103,25 +79,30 @@ class AgentServiceImpl(AgentService):
         llm: BaseChatModel,
         tools: Sequence[BaseTool],
         middlewares: Sequence[AgentMiddleware],
-        system_prompt: str,
+        system_prompt: PromptSource,
         tracer: Tracer,
         checkpointer: Checkpointer | None = None,
         store: BaseStore | None = None,
         state_schema: Any | None = None,
-        context_schema: Any | None = None,
     ) -> None:
+        """The system prompt is not baked into the graph.
+
+        It is resolved on every turn and handed to the run as its `Context`,
+        which `ContextMiddleware` from `middlewares` turns into the system
+        message — so the chain passed in must include it.
+        """
         self.llm = llm
         self.tracer = tracer
+        self.system_prompt = system_prompt
         self.agent = create_agent(
             model=self.llm,
             tools=list(tools),
-            middleware=list(middlewares),
-            system_prompt=system_prompt,
+            middleware=list(middlewares),  # type: ignore
             checkpointer=checkpointer,
             store=store,
             state_schema=state_schema,
-            context_schema=context_schema,
-        )
+            context_schema=Context,
+        )  # type: ignore
 
     async def stream_answer(
         self, prompt: Prompt, thread_id: str
@@ -164,11 +145,17 @@ class AgentServiceImpl(AgentService):
 
         The reply recorded is the text after the last tool event: what the
         model said before calling a tool was a step on the way, not the answer.
+
+        The system prompt is fetched here, once, so a turn never switches
+        versions halfway through its steps.
         """
-        with self.tracer.trace_prompt(session_id=thread_id, prompt=prompt.body) as trace:
+        with self.tracer.trace_prompt(
+            session_id=thread_id, prompt=prompt.body
+        ) as trace:
+            context = Context(system_prompt=await self.system_prompt.get())
             answer: list[str] = []
             try:
-                async for event in self._stream(prompt, thread_id):
+                async for event in self._stream(prompt, thread_id, context):
                     if isinstance(event, TextChunk):
                         answer.append(event.body)
                     else:
@@ -177,13 +164,16 @@ class AgentServiceImpl(AgentService):
             finally:
                 trace.record_answer("".join(answer))
 
-    async def _stream(self, prompt: Prompt, thread_id: str) -> AsyncIterator[AgentEvent]:
+    async def _stream(
+        self, prompt: Prompt, thread_id: str, context: Context
+    ) -> AsyncIterator[AgentEvent]:
         stream = self.agent.astream(
             {"messages": [{"role": "user", "content": prompt.body}]},
             config={
                 "configurable": {"thread_id": thread_id},
                 "callbacks": list(self.tracer.callbacks()),
             },
+            context=context,
             stream_mode=[UPDATES_MODE, MESSAGES_MODE],
         )
         async for payload in stream:
@@ -252,8 +242,7 @@ def get_agent_service() -> AgentService:
             enable_subagents=settings.enable_subagents,
             tools=tools,
         ),
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=get_system_prompt_source(),
         tracer=get_tracer(),
         state_schema=AgentState,
-        context_schema=Context,
     )

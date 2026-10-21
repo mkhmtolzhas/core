@@ -10,14 +10,17 @@ The recommended layout below follows from that:
 
 1. **Budget guard** — `ModelCallLimitMiddleware` first, so a runaway loop is cut
    off before any other work is done.
-2. **Tool providers** — todos, filesystem, search, shell, subagents. They only
+2. **System prompt** — `ContextMiddleware` sets the base system message from the
+   run's context. Outside every tool provider: they append to the message they
+   receive, so one placed outside it would have its text replaced.
+3. **Tool providers** — todos, filesystem, search, shell, subagents. They only
    contribute tools and prompt text, so their relative order is cosmetic.
-3. **Context management** — cheap deterministic pruning
+4. **Context management** — cheap deterministic pruning
    (`ContextEditingMiddleware`) before expensive LLM compaction
    (`SummarizationMiddleware`).
-4. **Model fault tolerance** — fallback outside retry: retry the primary model,
+5. **Model fault tolerance** — fallback outside retry: retry the primary model,
    and only switch models once those attempts are spent.
-5. **Tool fault tolerance** — error handling outside retry: retry the call, and
+6. **Tool fault tolerance** — error handling outside retry: retry the call, and
    only report a failure to the model once retries are spent.
 """
 
@@ -29,6 +32,7 @@ from langchain_core.language_models import BaseChatModel
 
 from src.services.agent.middlewares import (
     context_editing,
+    dynamic_prompt,
     file_search,
     filesystem,
     model_call_limit,
@@ -73,9 +77,11 @@ def build_middlewares(
             thread_limit=thread_call_limit,
             run_limit=run_call_limit,
         ),  # type: ignore
+        # 2. system prompt
+        dynamic_prompt.build(),
     ]
 
-    # 2. tool providers
+    # 3. tool providers
     if enable_todos:
         middlewares.append(todo_list.build())  # type: ignore
 
@@ -101,7 +107,7 @@ def build_middlewares(
             )  # type: ignore
         )
 
-    # 3. context management
+    # 4. context management
     middlewares.append(
         context_editing.build(
             trigger_tokens=context_edit_trigger_tokens,
@@ -116,7 +122,7 @@ def build_middlewares(
         )  # type: ignore
     )
 
-    # 4. model fault tolerance (fallback wraps retry)
+    # 5. model fault tolerance (fallback wraps retry)
     fallback = model_fallback.build(fallback_models=fallback_models)
     if fallback is not None:
         middlewares.append(fallback)
@@ -129,7 +135,7 @@ def build_middlewares(
         )
     )
 
-    # 5. tool fault tolerance (error handling wraps retry)
+    # 6. tool fault tolerance (error handling wraps retry)
     middlewares.append(tool_error.build())
     middlewares.append(
         tool_retry.build(

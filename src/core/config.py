@@ -155,6 +155,14 @@ class Settings(BaseSettings):
     langfuse_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
     """Share of turns traced. Sampling is per trace, so a kept turn is kept whole."""
 
+    langfuse_prompt_label: str = "production"
+    """Which version of each managed prompt the agent runs on.
+
+    A Langfuse label, not a version number: moving `production` to another
+    version in the UI changes the prompt without touching `.env`. Point this
+    at `staging` or similar to try a version out before promoting it.
+    """
+
     @model_validator(mode="after")
     def _require_api_key(self) -> "Settings":
         """Refuse to start a hosted provider without a credential.

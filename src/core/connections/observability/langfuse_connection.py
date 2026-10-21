@@ -5,6 +5,7 @@ looks like is the agent service's business (`src/services/agent/observability`).
 """
 
 import asyncio
+import logging
 from typing import Optional
 
 from langfuse import Langfuse
@@ -14,6 +15,9 @@ from src.core.connections.observability.masking import mask_secrets
 from src.core.connections.observability.observability_connection import (
     ObservabilityConnection,
 )
+from src.core.loggers.file_logger import file_logger
+
+SDK_LOGGER = "langfuse"
 
 
 class LangfuseConnection(ObservabilityConnection[Langfuse]):
@@ -66,6 +70,7 @@ class LangfuseConnection(ObservabilityConnection[Langfuse]):
         if not self.enabled or self._client is not None:
             return
 
+        _log_sdk_to_file()
         self._client = Langfuse(
             public_key=self._public_key,
             secret_key=self._secret_key,
@@ -91,6 +96,20 @@ class LangfuseConnection(ObservabilityConnection[Langfuse]):
         if self._client is None:
             raise RuntimeError("Langfuse connection is not initialized.")
         return self._client
+
+
+def _log_sdk_to_file() -> None:
+    """Send the SDK's own warnings to the log file instead of the terminal.
+
+    The SDK's logger has no handler, so Python prints its warnings to stderr —
+    into the middle of the prompt or a streaming answer. A prompt that is not
+    yet created in Langfuse would do that on every turn.
+    """
+    sdk_logger = logging.getLogger(SDK_LOGGER)
+    sdk_logger.propagate = False
+    for handler in file_logger.logger.handlers:
+        if handler not in sdk_logger.handlers:
+            sdk_logger.addHandler(handler)
 
 
 langfuse_connection = LangfuseConnection(
